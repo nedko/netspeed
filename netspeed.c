@@ -43,6 +43,8 @@
 
 #define DL_RESOURCE "/speedtest/random4000x4000.jpg"
 //#define DL_RESOURCE "/speedtest/random500x500.jpg"
+#define UL_RESOURCE "/speedtest/upload.php"
+#define UL_SIZE (30 * 1024 * 1024)
 
 /* OpenBSD */
 #if !defined(MSG_NOSIGNAL)
@@ -54,14 +56,16 @@ typedef void (* cleanup_fn)(void * ctx);
 
 #define STATE_NOT_CONNECTED           0
 #define STATE_CONNECTING              1
-#define STATE_SENDING_REQUEST         2
-#define STATE_READING_REPLY_HEADER    3
-#define STATE_READING_REPLY_BODY      4
+#define STATE_SENDING_REQUEST_HEADER  2
+#define STATE_SENDING_REQUEST_BODY    3
+#define STATE_READING_REPLY_HEADER    4
+#define STATE_READING_REPLY_BODY      5
 #define STATE_ERROR                  -1
 
 struct connection
 {
   int no;
+  bool upload;
   const char * host;
   int state;
   int socket;
@@ -81,6 +85,8 @@ int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
   ssize_t sret;
   size_t i;
   const char * ptr;
+  char size_str[100];
+  size_t size;
 
   //printf("[%d] state=%d\n", connection_ptr->no, connection_ptr->state);
 
@@ -91,7 +97,8 @@ int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
   case STATE_CONNECTING:
     assert((revents & POLLOUT) == POLLOUT);
     goto async_connect_done;
-  case STATE_SENDING_REQUEST:
+  case STATE_SENDING_REQUEST_HEADER:
+  case STATE_SENDING_REQUEST_BODY:
     assert((revents & POLLOUT) == POLLOUT);
     if ((revents & (POLLERR | POLLHUP)) != 0)
     {
@@ -215,34 +222,56 @@ async_connect_done:
   printf("[%d] async connect complete.\n", connection_ptr->no);
 
 send_request:
-  printf("[%d] sending request...\n", connection_ptr->no);
+  printf("[%d] sending request header...\n", connection_ptr->no);
+
+  if (connection_ptr->upload)
+  {
+    snprintf(size_str, sizeof(size_str), "%zu", UL_SIZE);
+  }
 
   ret = snprintf(
     connection_ptr->buffer,
     sizeof(connection_ptr->buffer),
-    "GET " DL_RESOURCE " HTTP/1.1\r\n"
+    "%s HTTP/1.1\r\n"
     "User-Agent: netspeed/0.0\r\n"
     "Accept: */*\r\n"
     "Host: %s\r\n"
+    "%s%s%s"
     "\r\n",
-    connection_ptr->host);
+    connection_ptr->upload ? "POST " UL_RESOURCE : "GET " DL_RESOURCE,
+    connection_ptr->host,
+    connection_ptr->upload ? "Content-Length: " : "",
+    connection_ptr->upload ? size_str : "",
+    connection_ptr->upload ? "\r\n" : "");
   if (ret < -1 || ret >= (int)sizeof(connection_ptr->buffer))
   {
     fprintf(stderr, "[%d] snprintf() failed compose request. %d\n", connection_ptr->no, ret);
     goto error;
   }
 
-  connection_ptr->state = STATE_SENDING_REQUEST;
+  //printf("[%d] request-header:\n%s\n", connection_ptr->no, connection_ptr->buffer);
+
+  connection_ptr->state = STATE_SENDING_REQUEST_HEADER;
   connection_ptr->offset = 0;
   connection_ptr->size = (size_t)ret;
 
 send_request_continue:
   while (connection_ptr->size > 0)
   {
+    if (connection_ptr->state == STATE_SENDING_REQUEST_BODY &&
+        connection_ptr->size >= sizeof(connection_ptr->buffer))
+    {
+      size = sizeof(connection_ptr->buffer);
+    }
+    else
+    {
+      size = connection_ptr->size;
+    }
+
     sret = send(
       connection_ptr->socket,
       connection_ptr->buffer + connection_ptr->offset,
-      connection_ptr->size,
+      size,
       MSG_NOSIGNAL);
     if (sret == -1)
     {
@@ -262,11 +291,31 @@ send_request_continue:
       goto error;
     }
 
-    connection_ptr->offset += sret;
+    if (connection_ptr->state == STATE_SENDING_REQUEST_HEADER)
+    {
+      connection_ptr->offset += sret;
+    }
+
     connection_ptr->size -= sret;
   }
 
-  printf("[%d] request sent\n", connection_ptr->no);
+  if (connection_ptr->state == STATE_SENDING_REQUEST_HEADER)
+  {
+    printf("[%d] request header sent\n", connection_ptr->no);
+
+    if (connection_ptr->upload)
+    {
+      connection_ptr->state = STATE_SENDING_REQUEST_BODY;
+      connection_ptr->offset = 0;
+      connection_ptr->size = UL_SIZE;
+      printf("[%d] sending request body...\n", connection_ptr->no);
+      goto send_request_continue;
+    }
+  }
+  else
+  {
+    printf("[%d] request body sent\n", connection_ptr->no);
+  }
 
   connection_ptr->state = STATE_READING_REPLY_HEADER;
   connection_ptr->offset = 0;   /* parsed size */
@@ -325,7 +374,7 @@ read_reply_header:
       }
 
       connection_ptr->buffer[connection_ptr->offset] = 0;
-      //printf("Header:\n%s\n", connection_ptr->no, connection_ptr->buffer);
+      //printf("[%d] reply-header:\n%s\n", connection_ptr->no, connection_ptr->buffer);
 
       /* calculate the size of body bytes we already read */
       i = connection_ptr->size - connection_ptr->offset;
@@ -463,14 +512,15 @@ create_worker(
   cleanup_fn * cleanup)
 {
   struct connection * connection_ptr;
+  bool upload;
 
   if (strcmp(type, "d") == 0)
   {
+    upload = false;
   }
   else if (strcmp(type, "u") == 0)
   {
-    fprintf(stderr, "[%d] upload test not implemented yet.\n", worker_no);
-    return false;
+    upload = true;
   }
   else
   {
@@ -488,6 +538,7 @@ create_worker(
   }
 
   connection_ptr->no = worker_no;
+  connection_ptr->upload = upload;
   connection_ptr->host = hostname;
   connection_ptr->state = STATE_NOT_CONNECTED;
   connection_ptr->socket = -1;
