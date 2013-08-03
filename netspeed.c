@@ -39,6 +39,11 @@
 #include <fcntl.h>
 #include <netdb.h>
 
+#define WORKERS 2
+
+#define DL_RESOURCE "/speedtest/random4000x4000.jpg"
+//#define DL_RESOURCE "/speedtest/random500x500.jpg"
+
 /* OpenBSD */
 #if !defined(MSG_NOSIGNAL)
 #define MSG_NOSIGNAL 0
@@ -56,6 +61,7 @@ typedef void (* cleanup_fn)(void * ctx);
 
 struct connection
 {
+  int no;
   const char * host;
   int state;
   int socket;
@@ -76,6 +82,8 @@ int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
   size_t i;
   const char * ptr;
 
+  //printf("[%d] state=%d\n", connection_ptr->no, connection_ptr->state);
+
   switch (connection_ptr->state)
   {
   case STATE_NOT_CONNECTED:
@@ -87,17 +95,17 @@ int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
     assert((revents & POLLOUT) == POLLOUT);
     if ((revents & (POLLERR | POLLHUP)) != 0)
     {
-      fprintf(stderr, "async send fd error. revents=%#hx\n", revents);
+      fprintf(stderr, "[%d] async send fd error. revents=%#hx\n", connection_ptr->no, revents);
 
       len = sizeof(val);
       ret = getsockopt(connection_ptr->socket, SOL_SOCKET, SO_ERROR, &val, &len);
       if (ret == -1)
       {
-        fprintf(stderr, "getsockopt() failed to get socket send error. %d (%s)\n", errno, strerror(errno));
+        fprintf(stderr, "[%d] getsockopt() failed to get socket send error. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
       }
       else
       {
-        fprintf(stderr, "async send() error %d (%s)\n", val, strerror(val));
+        fprintf(stderr, "[%d] async send() error %d (%s)\n", connection_ptr->no, val, strerror(val));
       }
       goto error;
     }
@@ -106,17 +114,17 @@ int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
     assert((revents & POLLIN) == POLLIN);
     if ((revents & (POLLERR | POLLHUP)) != 0)
     {
-      fprintf(stderr, "async reply header recv fd error. revents=%#hx\n", revents);
+      fprintf(stderr, "[%d] async reply header recv fd error. revents=%#hx\n", connection_ptr->no, revents);
 
       len = sizeof(val);
       ret = getsockopt(connection_ptr->socket, SOL_SOCKET, SO_ERROR, &val, &len);
       if (ret == -1)
       {
-        fprintf(stderr, "getsockopt() failed to get socket recv error. %d (%s)\n", errno, strerror(errno));
+        fprintf(stderr, "[%d] getsockopt() failed to get socket recv error. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
       }
       else
       {
-        fprintf(stderr, "async recv() error %d (%s)\n", val, strerror(val));
+        fprintf(stderr, "[%d] async recv() error %d (%s)\n", connection_ptr->no, val, strerror(val));
       }
       goto error;
     }
@@ -125,17 +133,17 @@ int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
     assert((revents & POLLIN) == POLLIN);
     if ((revents & (POLLERR | POLLHUP)) != 0)
     {
-      fprintf(stderr, "async reply body recv fd error. revents=%#hx\n", revents);
+      fprintf(stderr, "[%d] async reply body recv fd error. revents=%#hx\n", connection_ptr->no, revents);
 
       len = sizeof(val);
       ret = getsockopt(connection_ptr->socket, SOL_SOCKET, SO_ERROR, &val, &len);
       if (ret == -1)
       {
-        fprintf(stderr, "getsockopt() failed to get socket recv error. %d (%s)\n", errno, strerror(errno));
+        fprintf(stderr, "[%d] getsockopt() failed to get socket recv error. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
       }
       else
       {
-        fprintf(stderr, "async recv() error %d (%s)\n", val, strerror(val));
+        fprintf(stderr, "[%d] async recv() error %d (%s)\n", connection_ptr->no, val, strerror(val));
       }
       goto error;
     }
@@ -151,14 +159,14 @@ connect:
   connection_ptr->socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (connection_ptr->socket == -1)
   {
-    fprintf(stderr, "socket() failed. %d (%s)\n", errno, strerror(errno));
+    fprintf(stderr, "[%d] socket() failed. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
     goto error;
   }
 
   ret = fcntl(connection_ptr->socket, F_SETFL, O_NONBLOCK);
   if (ret == -1)
   {
-    fprintf(stderr, "fcntl() failed to set socket non-blocking mode. %d (%s)\n", errno, strerror(errno));
+    fprintf(stderr, "[%d] fcntl() failed to set socket non-blocking mode. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
     goto error;
   }
 
@@ -178,41 +186,41 @@ connect:
       return 1;
     }
 
-    fprintf(stderr, "connect() failed. %d (%s)\n", errno, strerror(errno));
+    fprintf(stderr, "[%d] connect() failed. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
     goto error;
   }
 
-  printf("connect complete.\n");
+  printf("[%d] connect complete.\n", connection_ptr->no);
   goto send_request;
 
 async_connect_done:
   if ((revents & (POLLERR | POLLHUP)) != 0)
   {
-    fprintf(stderr, "async connect failed. revents=%#hx\n", revents);
+    fprintf(stderr, "[%d] async connect failed. revents=%#hx\n", connection_ptr->no, revents);
   }
 
   len = sizeof(val);
   ret = getsockopt(connection_ptr->socket, SOL_SOCKET, SO_ERROR, &val, &len);
   if (ret == -1)
   {
-    fprintf(stderr, "getsockopt() failed to get socket connect error. %d (%s)\n", errno, strerror(errno));
+    fprintf(stderr, "[%d] getsockopt() failed to get socket connect error. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
     goto error;
   }
   if (val != 0)
   {
-    fprintf(stderr, "async connect() failed. %d (%s)\n", val, strerror(val));
+    fprintf(stderr, "[%d] async connect() failed. %d (%s)\n", connection_ptr->no, val, strerror(val));
     goto error;
   }
 
-  printf("async connect complete.\n");
+  printf("[%d] async connect complete.\n", connection_ptr->no);
 
 send_request:
-  printf("sending request...\n");
+  printf("[%d] sending request...\n", connection_ptr->no);
 
   ret = snprintf(
     connection_ptr->buffer,
     sizeof(connection_ptr->buffer),
-    "GET /speedtest/random4000x4000.jpg HTTP/1.1\r\n"
+    "GET " DL_RESOURCE " HTTP/1.1\r\n"
     "User-Agent: netspeed/0.0\r\n"
     "Accept: */*\r\n"
     "Host: %s\r\n"
@@ -220,7 +228,7 @@ send_request:
     connection_ptr->host);
   if (ret < -1 || ret >= (int)sizeof(connection_ptr->buffer))
   {
-    fprintf(stderr, "snprintf() failed compose request. %d\n", ret);
+    fprintf(stderr, "[%d] snprintf() failed compose request. %d\n", connection_ptr->no, ret);
     goto error;
   }
 
@@ -250,7 +258,7 @@ send_request_continue:
         return 1;
       }
 
-      fprintf(stderr, "send() failed. %d (%s)\n", errno, strerror(errno));
+      fprintf(stderr, "[%d] send() failed. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
       goto error;
     }
 
@@ -258,7 +266,7 @@ send_request_continue:
     connection_ptr->size -= sret;
   }
 
-  printf("request sent\n");
+  printf("[%d] request sent\n", connection_ptr->no);
 
   connection_ptr->state = STATE_READING_REPLY_HEADER;
   connection_ptr->offset = 0;   /* parsed size */
@@ -267,7 +275,7 @@ send_request_continue:
 read_reply_header:
   if (connection_ptr->size >= sizeof(connection_ptr->buffer))
   {
-    fprintf(stderr, "HTTP reply header too big\n");
+    fprintf(stderr, "[%d] HTTP reply header too big\n", connection_ptr->no);
     goto error;
   }
 
@@ -290,7 +298,7 @@ read_reply_header:
       return 1;
     }
 
-    fprintf(stderr, "recv() failed. %d (%s)\n", errno, strerror(errno));
+    fprintf(stderr, "[%d] recv() failed. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
     goto error;
   }
 
@@ -304,12 +312,12 @@ read_reply_header:
         connection_ptr->buffer[i + 3] == '\n')
     {
       connection_ptr->offset = i + 4;
-      printf("header size is %zu bytes\n", connection_ptr->offset);
+      printf("[%d] header size is %zu bytes\n", connection_ptr->no, connection_ptr->offset);
       for (i = 0; i < connection_ptr->offset; i++)
       {
         if (connection_ptr->buffer[i] < 0)
         {
-          fprintf(stderr, "invalid char in HTTP reply header\n");
+          fprintf(stderr, "[%d] invalid char in HTTP reply header\n", connection_ptr->no);
           goto error;
         }
 
@@ -317,7 +325,7 @@ read_reply_header:
       }
 
       connection_ptr->buffer[connection_ptr->offset] = 0;
-      //printf("Header:\n%s\n", connection_ptr->buffer);
+      //printf("Header:\n%s\n", connection_ptr->no, connection_ptr->buffer);
 
       /* calculate the size of body bytes we already read */
       i = connection_ptr->size - connection_ptr->offset;
@@ -344,11 +352,11 @@ read_reply_header:
 
       if (val > 0)
       {
-        printf("total body size is %d bytes\n", val);
+        printf("[%d] total body size is %d bytes\n", connection_ptr->no, val);
 
         if ((size_t)val < i)
         {
-          fprintf(stderr, "body bigger than announced\n");
+          fprintf(stderr, "[%d] body bigger than announced\n", connection_ptr->no);
           goto error;
         }
 
@@ -360,7 +368,7 @@ read_reply_header:
       unknown_size:
        /* server didnt provide body size,
            assume body end will be marked by connection close */
-        printf("unknown body size\n");
+        printf("[%d] unknown body size\n", connection_ptr->no);
         goto error;
         connection_ptr->size = SIZE_MAX;
       }
@@ -401,7 +409,7 @@ read_reply_body:
         return 1;
       }
 
-      fprintf(stderr, "recv() failed. %d (%s)\n", errno, strerror(errno));
+      fprintf(stderr, "[%d] recv() failed. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
       goto error;
     }
 
@@ -410,7 +418,7 @@ read_reply_body:
     //printf("(%zd)", sret); fflush(stdout);
   }
 
-  printf("%zu body bytes read\n", connection_ptr->offset);
+  printf("[%d] %zu body bytes read\n", connection_ptr->no, connection_ptr->offset);
   goto send_request;
   //return 0;                     /* done */
 
@@ -423,58 +431,67 @@ void connection_cleanup(void * ctx)
 {
   if (connection_ptr->socket != -1)
   {
-    printf("closing socket...\n");
+    printf("[%d] closing socket...\n", connection_ptr->no);
     close(connection_ptr->socket);
   }
 }
 
 #undef connection_ptr
 
+uint32_t resolve_host(const char * hostname)
+{
+  struct hostent * he_ptr;
+
+  he_ptr = gethostbyname(hostname);
+  if (he_ptr == NULL)
+  {
+    fprintf(stderr, "Cannot resolve \"%s\". h_errno is %d\n", hostname, h_errno);
+    return 0;
+  }
+
+  return *(uint32_t *)(he_ptr->h_addr);
+}
+
 bool
 create_worker(
+  int worker_no,
   const char * type,
+  uint32_t ip,
   const char * hostname,
   void ** ctx,
   work_fn * work,
   cleanup_fn * cleanup)
 {
   struct connection * connection_ptr;
-  struct hostent * he_ptr;
 
   if (strcmp(type, "d") == 0)
   {
   }
   else if (strcmp(type, "u") == 0)
   {
-    fprintf(stderr, "upload test not implemented yet.\n");
+    fprintf(stderr, "[%d] upload test not implemented yet.\n", worker_no);
     return false;
   }
   else
   {
-    fprintf(stderr, "unknown type \"%s\".\n", type);
+    fprintf(stderr, "[%d] unknown type \"%s\".\n", worker_no, type);
     return false;
   }
 
-  he_ptr = gethostbyname(hostname);
-  if (he_ptr == NULL)
-  {
-    fprintf(stderr, "Cannot resolve \"%s\". h_errno is %d\n", hostname, h_errno);
-    return false;
-  }
-
-  printf("connecting to %s\n", hostname);
+  printf("[%d] connecting to %s\n", worker_no, hostname);
 
   connection_ptr = malloc(sizeof(struct connection));
   if (connection_ptr == NULL)
   {
-    fprintf(stderr, "memory allocation failed.\n");
+    fprintf(stderr, "[%d] memory allocation failed.\n", worker_no);
     return false;
   }
 
+  connection_ptr->no = worker_no;
   connection_ptr->host = hostname;
   connection_ptr->state = STATE_NOT_CONNECTED;
   connection_ptr->socket = -1;
-  connection_ptr->ip = *(uint32_t *)(he_ptr->h_addr);
+  connection_ptr->ip = ip;
 
   *ctx = connection_ptr;
   *work = worker;
@@ -486,10 +503,16 @@ create_worker(
 int main(int argc, char ** argv)
 {
   int ret;
-  void * ctx;
-  work_fn work;
-  cleanup_fn cleanup;
-  struct pollfd pollfd;
+  uint32_t ip;
+  struct worker
+  {
+    void * ctx;
+    work_fn work;
+    cleanup_fn cleanup;
+    struct pollfd pollfd;
+  } workers[WORKERS];
+  struct pollfd pollfds[WORKERS];
+  int i, nfds, poll_index;
 
   printf("Generate network traffic. Written by Nedko Arnaudov.\n");
 
@@ -498,42 +521,142 @@ int main(int argc, char ** argv)
     printf("Usage: netspeed <type> <host>\n");
     printf("<type> is either 'u' (upload) or 'd' (download)\n");
     printf("<host> is a ookla speedtest host\n");
-    return 0;
+    ret = 0;
+    goto exit;
   }
 
   ret = mlockall(MCL_FUTURE);
   if (ret == -1)
   {
     fprintf(stderr, "mlockall() failed. %d (%s)\n", errno, strerror(errno));
-    return 1;
+    goto fail;
   }
 
-  if (!create_worker(argv[1], argv[2], &ctx, &work, &cleanup))
+  ip = resolve_host(argv[2]);
+  if (ip == 0)
   {
-    return 1;
+    goto fail;
   }
 
-  pollfd.revents = 0;
+  for (i = 0; i < WORKERS; i++)
+  {
+    workers[i].cleanup = NULL;
+  }
 
+  for (i = 0; i < WORKERS; i++)
+  {
+    if (!create_worker(
+          i,
+          argv[1],
+          ip,
+          argv[2],
+          &workers[i].ctx,
+          &workers[i].work,
+          &workers[i].cleanup))
+    {
+      goto fail;
+    }
+
+    workers[i].pollfd.fd = -1;
+    workers[i].pollfd.revents = 0;
+  }
+
+  poll_index = 0;
 loop:
-  ret = work(ctx, pollfd.revents, &pollfd.fd, &pollfd.events);
-  if (ret <= 0)
+  assert(poll_index == 0);
+  for (i = 0; i < WORKERS; i++)
   {
-    ret = -ret;
-    goto exit;
+    if (workers[i].work != NULL)
+    {
+      if (workers[i].pollfd.fd == -1 || /* first time */
+          workers[i].pollfd.revents != 0) /* or when there are pending events */
+      {
+        ret = workers[i].work(
+          workers[i].ctx,
+          workers[i].pollfd.revents,
+          &workers[i].pollfd.fd,
+          &workers[i].pollfd.events);
+        if (ret < 0)
+        {
+          ret = -ret;
+          goto cleanup;
+        }
+
+        if (ret == 0)
+        {
+          /* worker done */
+          workers[i].work = NULL;
+          printf("worker done\n");
+          continue;
+        }
+
+        workers[i].pollfd.revents = 0;
+
+        assert(workers[i].pollfd.fd != -1);
+        assert(workers[i].pollfd.events != 0);
+        //printf("[%d] worker waits on %d\n", i, workers[i].pollfd.fd);
+      }
+      else
+      {
+        //printf("[%d] worker still waits on %d\n", i, workers[i].pollfd.fd);
+      }
+
+      pollfds[poll_index].fd = workers[i].pollfd.fd;
+      pollfds[poll_index].events = workers[i].pollfd.events;
+      pollfds[poll_index].revents = 0;
+      poll_index++;
+    }
   }
 
-  ret = poll(&pollfd, 1, -1);
+  if (poll_index == 0)
+  {
+    ret = 0;
+    printf("no more workers\n");
+    goto cleanup;
+  }
+
+  nfds = poll_index;
+  //printf("polling %d fds\n", nfds);
+  ret = poll(pollfds, nfds, -1);
+  //printf("poll() returns %d\n", ret);
   if (ret == -1)
   {
     fprintf(stderr, "poll() failed. %d (%s)\n", errno, strerror(errno));
-    ret = 1;
-    goto exit;
+    goto fail;
   }
 
+  assert(ret > 0);
+  poll_index = 0;
+  while (ret > 0)
+  {
+    assert(poll_index < nfds);
+    if (pollfds[poll_index].revents != 0)
+    {
+      for (i = 0; i < WORKERS; i++)
+      {
+        if (workers[i].work != NULL &&
+            workers[i].pollfd.fd == pollfds[poll_index].fd)
+        {
+          workers[i].pollfd.revents = pollfds[poll_index].revents;
+          assert(workers[i].pollfd.revents != 0);
+          break;
+        }
+      }
+      assert(i < WORKERS);        /* fd/worker not found */
+      ret--;
+    }
+    poll_index++;
+  }
+  poll_index = 0;
   goto loop;
 
+fail:
+  ret = 1;
+cleanup:
+  for (i = 0; i < WORKERS; i++)
+  {
+    workers[i].cleanup(workers[i].ctx);
+  }
 exit:
-  cleanup(ctx);
   return ret;
 }
