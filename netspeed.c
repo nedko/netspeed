@@ -595,7 +595,7 @@ create_worker(
     return false;
   }
 
-  LOG_WORKER(LOGLVL_INFO, worker_no, "connecting to %s", hostname);
+  LOG_WORKER(LOGLVL_INFO, worker_no, "connecting to %s for %s", hostname, upload ? "uploading" : "downloading");
 
   connection_ptr = malloc(sizeof(struct connection));
   if (connection_ptr == NULL)
@@ -649,6 +649,9 @@ int main(int argc, char ** argv)
   struct pollfd * pollfds = NULL;
   int nfds, poll_index;
   size_t i;
+  bool worker_count_supplied = false;
+  size_t workers_per_host;
+  int host_index;
 
   argc--; argv++;
 
@@ -685,6 +688,7 @@ int main(int argc, char ** argv)
       }
 
       g_workers = i;
+      worker_count_supplied = true;
       argc--; argv++;
     }
     else if (strcmp(*argv, "-u") == 0 && argc >= 2)
@@ -708,18 +712,18 @@ int main(int argc, char ** argv)
     argc--; argv++;
   }
 
-  if (argc != 2)
+  if (argc == 0 || (argc % 2) != 0)
   {
   help:
     LFRC(ABOUT);
-    LFRC("Usage: netspeed [options] <type> <host>");
+    LFRC("Usage: netspeed [options] <type> <host> [<type> <host>] ...");
     LFRC("");
     LFRC("Options:");
     LFRC("  -v Increase verbosity. May be used more than once.");
     LFRC("  -q Decrease verbosity. May be used more than once.");
     LFRC("  -s Be completely silent.");
     LFRC("  -p Print progress (dots). Use twice for printing chunk sizes.");
-    LFRC("  -w <num> Workers count.");
+    LFRC("  -w <num> Worker count (per type/host pair).");
     LFRC("  -u <num> Upload size. Ignored when downloading.");
     LFRC("  --help Shows this help text");
     LFRC("");
@@ -735,7 +739,22 @@ int main(int argc, char ** argv)
     LFRC("log level max is %d", g_log_max);
   }
 
-  LFRC("%zu workers", g_workers);
+  if (argc > 2)
+  {
+    workers_per_host = worker_count_supplied ? g_workers : 1;
+
+    LFRC("%zu worker(s) per host", workers_per_host);
+
+    g_workers = workers_per_host * (argc / 2);
+
+    LFRC("%zu total worker(s)", g_workers);
+  }
+  else
+  {
+    workers_per_host = g_workers;
+    LFRC("%zu worker(s)", g_workers);
+  }
+
   LFRC("POST body size: %zu bytes", g_ul_size);
   //LFRC("download resource: %s", g_dl_resource);
   //LFRC("upload resource: %s", g_ul_resource);
@@ -762,29 +781,40 @@ int main(int argc, char ** argv)
     goto fail;
   }
 
-  ip = resolve_host(argv[1]);
-  if (ip == 0)
+  host_index = 0;
+  while (argc > 0)
   {
-    goto fail;
-  }
+    assert(argc >= 2);
+    assert(argc % 2 == 0);
 
-  for (i = 0; i < g_workers; i++)
-  {
-    if (!create_worker(
-          i,
-          argv[0],
-          ip,
-          argv[1],
-          &workers[i].ctx,
-          &workers[i].work,
-          &workers[i].cleanup))
+    ip = resolve_host(argv[1]);
+    if (ip == 0)
     {
-      g_workers = 0;
       goto fail;
     }
 
-    workers[i].pollfd.fd = -1;
-    workers[i].pollfd.revents = 0;
+    for (i = host_index * workers_per_host; i < (host_index + 1) * workers_per_host; i++)
+    {
+      if (!create_worker(
+            i,
+            argv[0],
+            ip,
+            argv[1],
+            &workers[i].ctx,
+            &workers[i].work,
+            &workers[i].cleanup))
+      {
+        g_workers = 0;
+        goto fail;
+      }
+
+      workers[i].pollfd.fd = -1;
+      workers[i].pollfd.revents = 0;
+    }
+
+    host_index++;
+    argc -= 2;
+    argv += 2;
   }
 
   ret = mlockall(MCL_CURRENT | MCL_FUTURE);
