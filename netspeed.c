@@ -38,6 +38,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <signal.h>
 
 #define WORKERS 2
 
@@ -579,6 +580,12 @@ int main(int argc, char ** argv)
   for (i = 0; i < WORKERS; i++)
   {
     workers[i].cleanup = NULL;
+  }
+
+  if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
+  {
+    fprintf(stderr, "Cannot ignore SIGPIPE. %d (%s)\n", errno, strerror(errno));
+    goto fail;
   }
 
   ip = resolve_host(argv[2]);
