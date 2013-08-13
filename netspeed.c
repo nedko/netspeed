@@ -116,7 +116,7 @@ void log_msg(int level, const char * format, ...)
 #define LOG_MSG_(level, format, ...)             \
   log_msg(level, format "\n", ##__VA_ARGS__)
 #define LOG_WORKER(level, no, format, ...)                \
-  log_msg(level, "[%d] " format "\n", no, ##__VA_ARGS__)
+  log_msg(level, "[%d] " format "\n", (int)(no), ##__VA_ARGS__)
 #define LOG_WORKER_(level, format, ...)                         \
   LOG_WORKER(level, connection_ptr->no, format, ##__VA_ARGS__)
 
