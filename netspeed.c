@@ -27,6 +27,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <stdarg.h>
 
 /* POSIX */
 #include <poll.h>
@@ -79,7 +80,45 @@ struct connection
   char buffer[1024 * 1024];
 };
 
+#define LOGLVL_NO      -1
+#define LOGLVL_FORCE    0
+#define LOGLVL_ERROR    1
+#define LOGLVL_WARNING  2
+#define LOGLVL_INFO     3
+#define LOGLVL_DEBUG1   4
+#define LOGLVL_DEBUG2   5
+
+static int g_log_max = LOGLVL_INFO;
+
+void log_msg(int level, const char * format, ...) __attribute__((format(printf, 2, 3)));
+void log_msg(int level, const char * format, ...)
+{
+  va_list ap;
+
+  if (level > g_log_max) return;
+
+  va_start(ap, format);
+  vfprintf(level > 0 ? stdout : stderr, format, ap);
+  va_end(ap);
+}
+
 #define connection_ptr ((struct connection *)ctx)
+
+#define LOG_MSG_(level, format, ...)             \
+  log_msg(level, format "\n", ##__VA_ARGS__)
+#define LOG_WORKER(level, no, format, ...)                \
+  log_msg(level, "[%d] " format "\n", no, ##__VA_ARGS__)
+#define LOG_WORKER_(level, format, ...)                         \
+  LOG_WORKER(level, connection_ptr->no, format, ##__VA_ARGS__)
+
+#define LFRC( format, ...) LOG_MSG(LOGLVL_FORCE,   format, ##__VA_ARGS__)
+#define LERR( format, ...) LOG_MSG(LOGLVL_ERROR,   format, ##__VA_ARGS__)
+#define LWRN( format, ...) LOG_MSG(LOGLVL_WARNING, format, ##__VA_ARGS__)
+#define LINF( format, ...) LOG_MSG(LOGLVL_INFO,    format, ##__VA_ARGS__)
+#define LDBG1(format, ...) LOG_MSG(LOGLVL_DEBUG1,  format, ##__VA_ARGS__)
+#define LDBG2(format, ...) LOG_MSG(LOGLVL_DEBUG2,  format, ##__VA_ARGS__)
+
+#define LOG_MSG LOG_WORKER_
 
 int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
 {
@@ -92,7 +131,7 @@ int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
   char size_str[100];
   size_t size;
 
-  //printf("[%d] state=%d\n", connection_ptr->no, connection_ptr->state);
+  LDBG2("state=%d", connection_ptr->state);
 
   switch (connection_ptr->state)
   {
@@ -106,17 +145,17 @@ int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
     assert((revents & POLLOUT) == POLLOUT);
     if ((revents & (POLLERR | POLLHUP)) != 0)
     {
-      fprintf(stderr, "[%d] async send fd error. revents=%#hx\n", connection_ptr->no, revents);
+      LERR("async send fd error. revents=%#hx", revents);
 
       len = sizeof(val);
       ret = getsockopt(connection_ptr->socket, SOL_SOCKET, SO_ERROR, &val, &len);
       if (ret == -1)
       {
-        fprintf(stderr, "[%d] getsockopt() failed to get socket send error. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
+        LERR("getsockopt() failed to get socket send error. %d (%s)", errno, strerror(errno));
       }
       else
       {
-        fprintf(stderr, "[%d] async send() error %d (%s)\n", connection_ptr->no, val, strerror(val));
+        LERR("async send() error %d (%s)", val, strerror(val));
       }
       goto error;
     }
@@ -125,17 +164,17 @@ int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
     assert((revents & POLLIN) == POLLIN);
     if ((revents & (POLLERR | POLLHUP)) != 0)
     {
-      fprintf(stderr, "[%d] async reply header recv fd error. revents=%#hx\n", connection_ptr->no, revents);
+      LERR("async reply header recv fd error. revents=%#hx", revents);
 
       len = sizeof(val);
       ret = getsockopt(connection_ptr->socket, SOL_SOCKET, SO_ERROR, &val, &len);
       if (ret == -1)
       {
-        fprintf(stderr, "[%d] getsockopt() failed to get socket recv error. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
+        LERR("getsockopt() failed to get socket recv error. %d (%s)", errno, strerror(errno));
       }
       else
       {
-        fprintf(stderr, "[%d] async recv() error %d (%s)\n", connection_ptr->no, val, strerror(val));
+        LERR("async recv() error %d (%s)", val, strerror(val));
       }
       goto error;
     }
@@ -144,17 +183,17 @@ int worker(void * ctx, short revents, int * fd_ptr, short * events_ptr)
     assert((revents & POLLIN) == POLLIN);
     if ((revents & (POLLERR | POLLHUP)) != 0)
     {
-      fprintf(stderr, "[%d] async reply body recv fd error. revents=%#hx\n", connection_ptr->no, revents);
+      LERR("async reply body recv fd error. revents=%#hx", revents);
 
       len = sizeof(val);
       ret = getsockopt(connection_ptr->socket, SOL_SOCKET, SO_ERROR, &val, &len);
       if (ret == -1)
       {
-        fprintf(stderr, "[%d] getsockopt() failed to get socket recv error. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
+        LERR("getsockopt() failed to get socket recv error. %d (%s)", errno, strerror(errno));
       }
       else
       {
-        fprintf(stderr, "[%d] async recv() error %d (%s)\n", connection_ptr->no, val, strerror(val));
+        LERR("async recv() error %d (%s)", val, strerror(val));
       }
       goto error;
     }
@@ -170,14 +209,14 @@ connect:
   connection_ptr->socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (connection_ptr->socket == -1)
   {
-    fprintf(stderr, "[%d] socket() failed. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
+    LERR("socket() failed. %d (%s)", errno, strerror(errno));
     goto error;
   }
 
   ret = fcntl(connection_ptr->socket, F_SETFL, O_NONBLOCK);
   if (ret == -1)
   {
-    fprintf(stderr, "[%d] fcntl() failed to set socket non-blocking mode. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
+    LERR("fcntl() failed to set socket non-blocking mode. %d (%s)", errno, strerror(errno));
     goto error;
   }
 
@@ -197,36 +236,36 @@ connect:
       return 1;
     }
 
-    fprintf(stderr, "[%d] connect() failed. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
+    LERR("connect() failed. %d (%s)", errno, strerror(errno));
     goto error;
   }
 
-  printf("[%d] connect complete.\n", connection_ptr->no);
+  LINF("connect complete.");
   goto send_request;
 
 async_connect_done:
   if ((revents & (POLLERR | POLLHUP)) != 0)
   {
-    fprintf(stderr, "[%d] async connect failed. revents=%#hx\n", connection_ptr->no, revents);
+    LERR("async connect failed. revents=%#hx", revents);
   }
 
   len = sizeof(val);
   ret = getsockopt(connection_ptr->socket, SOL_SOCKET, SO_ERROR, &val, &len);
   if (ret == -1)
   {
-    fprintf(stderr, "[%d] getsockopt() failed to get socket connect error. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
+    LERR("getsockopt() failed to get socket connect error. %d (%s)", errno, strerror(errno));
     goto error;
   }
   if (val != 0)
   {
-    fprintf(stderr, "[%d] async connect() failed. %d (%s)\n", connection_ptr->no, val, strerror(val));
+    LERR("async connect() failed. %d (%s)", val, strerror(val));
     goto error;
   }
 
-  printf("[%d] async connect complete.\n", connection_ptr->no);
+  LINF("async connect complete.");
 
 send_request:
-  printf("[%d] sending request header...\n", connection_ptr->no);
+  LINF("sending request header...");
 
   if (connection_ptr->upload)
   {
@@ -249,11 +288,11 @@ send_request:
     connection_ptr->upload ? "\r\n" : "");
   if (ret < -1 || ret >= (int)sizeof(connection_ptr->buffer))
   {
-    fprintf(stderr, "[%d] snprintf() failed compose request. %d\n", connection_ptr->no, ret);
+    LERR("snprintf() failed compose request. %d", ret);
     goto error;
   }
 
-  //printf("[%d] request-header:\n%s\n", connection_ptr->no, connection_ptr->buffer);
+  LDBG1("request-header:\n%s", connection_ptr->buffer);
 
   connection_ptr->state = STATE_SENDING_REQUEST_HEADER;
   connection_ptr->offset = 0;
@@ -291,7 +330,7 @@ send_request_continue:
         return 1;
       }
 
-      fprintf(stderr, "[%d] send() failed. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
+      LERR("send() failed. %d (%s)", errno, strerror(errno));
       goto error;
     }
 
@@ -305,20 +344,20 @@ send_request_continue:
 
   if (connection_ptr->state == STATE_SENDING_REQUEST_HEADER)
   {
-    printf("[%d] request header sent\n", connection_ptr->no);
+    LINF("request header sent");
 
     if (connection_ptr->upload)
     {
       connection_ptr->state = STATE_SENDING_REQUEST_BODY;
       connection_ptr->offset = 0;
       connection_ptr->size = UL_SIZE;
-      printf("[%d] sending request body...\n", connection_ptr->no);
+      LINF("sending request body...");
       goto send_request_continue;
     }
   }
   else
   {
-    printf("[%d] request body sent\n", connection_ptr->no);
+    LINF("request body sent");
   }
 
   connection_ptr->state = STATE_READING_REPLY_HEADER;
@@ -328,7 +367,7 @@ send_request_continue:
 read_reply_header:
   if (connection_ptr->size >= sizeof(connection_ptr->buffer))
   {
-    fprintf(stderr, "[%d] HTTP reply header too big\n", connection_ptr->no);
+    LERR("HTTP reply header too big");
     goto error;
   }
 
@@ -351,7 +390,7 @@ read_reply_header:
       return 1;
     }
 
-    fprintf(stderr, "[%d] recv() failed. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
+    LERR("recv() failed. %d (%s)", errno, strerror(errno));
     goto error;
   }
 
@@ -365,12 +404,12 @@ read_reply_header:
         connection_ptr->buffer[i + 3] == '\n')
     {
       connection_ptr->offset = i + 4;
-      printf("[%d] header size is %zu bytes\n", connection_ptr->no, connection_ptr->offset);
+      LINF("header size is %zu bytes", connection_ptr->offset);
       for (i = 0; i < connection_ptr->offset; i++)
       {
         if (connection_ptr->buffer[i] < 0)
         {
-          fprintf(stderr, "[%d] invalid char in HTTP reply header\n", connection_ptr->no);
+          LERR("invalid char in HTTP reply header");
           goto error;
         }
 
@@ -378,7 +417,7 @@ read_reply_header:
       }
 
       connection_ptr->buffer[connection_ptr->offset] = 0;
-      //printf("[%d] reply-header:\n%s\n", connection_ptr->no, connection_ptr->buffer);
+      LDBG1("reply-header:\n%s", connection_ptr->buffer);
 
       /* calculate the size of body bytes we already read */
       i = connection_ptr->size - connection_ptr->offset;
@@ -405,11 +444,11 @@ read_reply_header:
 
       if (val > 0)
       {
-        printf("[%d] total body size is %d bytes\n", connection_ptr->no, val);
+        LINF("total body size is %d bytes", val);
 
         if ((size_t)val < i)
         {
-          fprintf(stderr, "[%d] body bigger than announced\n", connection_ptr->no);
+          LERR("body bigger than announced");
           goto error;
         }
 
@@ -421,7 +460,7 @@ read_reply_header:
       unknown_size:
        /* server didnt provide body size,
            assume body end will be marked by connection close */
-        printf("[%d] unknown body size\n", connection_ptr->no);
+        LWRN("unknown body size");
         goto error;
         connection_ptr->size = SIZE_MAX;
       }
@@ -462,7 +501,7 @@ read_reply_body:
         return 1;
       }
 
-      fprintf(stderr, "[%d] recv() failed. %d (%s)\n", connection_ptr->no, errno, strerror(errno));
+      LERR("recv() failed. %d (%s)", errno, strerror(errno));
       goto error;
     }
 
@@ -471,7 +510,7 @@ read_reply_body:
     //printf("(%zd)", sret); fflush(stdout);
   }
 
-  printf("[%d] %zu body bytes read\n", connection_ptr->no, connection_ptr->offset);
+  LINF("%zu body bytes read", connection_ptr->offset);
   goto send_request;
   //return 0;                     /* done */
 
@@ -484,12 +523,14 @@ void connection_cleanup(void * ctx)
 {
   if (connection_ptr->socket != -1)
   {
-    printf("[%d] closing socket...\n", connection_ptr->no);
+    LINF("closing socket...");
     close(connection_ptr->socket);
   }
 }
 
 #undef connection_ptr
+#undef LOG_MSG
+#define LOG_MSG LOG_MSG_
 
 uint32_t resolve_host(const char * hostname)
 {
@@ -498,7 +539,7 @@ uint32_t resolve_host(const char * hostname)
   he_ptr = gethostbyname(hostname);
   if (he_ptr == NULL)
   {
-    fprintf(stderr, "Cannot resolve \"%s\". h_errno is %d\n", hostname, h_errno);
+    LERR("Cannot resolve \"%s\". h_errno is %d", hostname, h_errno);
     return 0;
   }
 
@@ -528,16 +569,16 @@ create_worker(
   }
   else
   {
-    fprintf(stderr, "[%d] unknown type \"%s\".\n", worker_no, type);
+    LOG_WORKER(LOGLVL_ERROR, worker_no, "unknown type \"%s\".", type);
     return false;
   }
 
-  printf("[%d] connecting to %s\n", worker_no, hostname);
+  LOG_WORKER(LOGLVL_INFO, worker_no, "connecting to %s", hostname);
 
   connection_ptr = malloc(sizeof(struct connection));
   if (connection_ptr == NULL)
   {
-    fprintf(stderr, "[%d] memory allocation failed.\n", worker_no);
+    LOG_WORKER(LOGLVL_ERROR, worker_no, "memory allocation failed.");
     return false;
   }
 
@@ -563,7 +604,7 @@ static bool disable_preemption(int priority)
   sched_param.sched_priority = priority;
   if (sched_setscheduler(0, SCHED_FIFO, &sched_param) != 0)
   {
-    fprintf(stderr, "Cannot set scheduling policy %d (%s)\n", errno, strerror(errno));
+    LERR("Cannot set scheduling policy %d (%s)", errno, strerror(errno));
     return false;
   }
 
@@ -585,7 +626,7 @@ int main(int argc, char ** argv)
   struct pollfd pollfds[WORKERS];
   int i, nfds, poll_index;
 
-  printf("Generate network traffic. Written by Nedko Arnaudov.\n");
+  LFRC("Generate network traffic. Written by Nedko Arnaudov.");
 
   if (argc < 2)
   {
@@ -603,7 +644,7 @@ int main(int argc, char ** argv)
 
   if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
   {
-    fprintf(stderr, "Cannot ignore SIGPIPE. %d (%s)\n", errno, strerror(errno));
+    LERR("Cannot ignore SIGPIPE. %d (%s)", errno, strerror(errno));
     goto fail;
   }
 
@@ -634,7 +675,7 @@ int main(int argc, char ** argv)
   ret = mlockall(MCL_CURRENT | MCL_FUTURE);
   if (ret == -1)
   {
-    fprintf(stderr, "mlockall() failed. %d (%s)\n", errno, strerror(errno));
+    LERR("mlockall() failed. %d (%s)", errno, strerror(errno));
     //goto fail;
   }
 
@@ -670,7 +711,7 @@ loop:
         {
           /* worker done */
           workers[i].work = NULL;
-          printf("worker done\n");
+          LOG_WORKER(LOGLVL_INFO, i, "worker done");
           continue;
         }
 
@@ -678,11 +719,11 @@ loop:
 
         assert(workers[i].pollfd.fd != -1);
         assert(workers[i].pollfd.events != 0);
-        //printf("[%d] worker waits on %d\n", i, workers[i].pollfd.fd);
+        LOG_WORKER(LOGLVL_DEBUG2, i, "worker waits on %d\n", workers[i].pollfd.fd);
       }
       else
       {
-        //printf("[%d] worker still waits on %d\n", i, workers[i].pollfd.fd);
+        LOG_WORKER(LOGLVL_DEBUG2, i, "worker still waits on %d\n", workers[i].pollfd.fd);
       }
 
       pollfds[poll_index].fd = workers[i].pollfd.fd;
@@ -695,17 +736,17 @@ loop:
   if (poll_index == 0)
   {
     ret = 0;
-    printf("no more workers\n");
+    LINF("no more workers");
     goto cleanup;
   }
 
   nfds = poll_index;
-  //printf("polling %d fds\n", nfds);
+  LDBG2("polling %d fds", nfds);
   ret = poll(pollfds, nfds, -1);
-  //printf("poll() returns %d\n", ret);
+  LDBG2("poll() returns %d", ret);
   if (ret == -1)
   {
-    fprintf(stderr, "poll() failed. %d (%s)\n", errno, strerror(errno));
+    LERR("poll() failed. %d (%s)", errno, strerror(errno));
     goto fail;
   }
 
