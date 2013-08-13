@@ -44,12 +44,14 @@
 #include <sched.h>
 #endif
 
-#define WORKERS 2
+#define DEFAULT_WORKERS 2
 
-#define DL_RESOURCE "/speedtest/random4000x4000.jpg"
+#define DEFAULT_DL_RESOURCE "/speedtest/random4000x4000.jpg"
 //#define DL_RESOURCE "/speedtest/random500x500.jpg"
-#define UL_RESOURCE "/speedtest/upload.php"
-#define UL_SIZE ((size_t)(30 * 1024 * 1024))
+#define DEFAULT_UL_RESOURCE "/speedtest/upload.php"
+#define DEFAULT_UL_SIZE ((size_t)(30 * 1024 * 1024))
+
+#define ABOUT "Generate network traffic. Written by Nedko Arnaudov."
 
 /* OpenBSD */
 #if !defined(MSG_NOSIGNAL)
@@ -88,7 +90,14 @@ struct connection
 #define LOGLVL_DEBUG1   4
 #define LOGLVL_DEBUG2   5
 
-static int g_log_max = LOGLVL_INFO;
+#define LOGLVL_DEFAULT_MAX LOGLVL_WARNING
+
+static int g_log_max = LOGLVL_DEFAULT_MAX;
+static int g_progress = 0;
+static size_t g_workers = DEFAULT_WORKERS;
+static const char * g_dl_resource = DEFAULT_DL_RESOURCE;
+static const char * g_ul_resource = DEFAULT_UL_RESOURCE;
+static size_t g_ul_size = DEFAULT_UL_SIZE;
 
 void log_msg(int level, const char * format, ...) __attribute__((format(printf, 2, 3)));
 void log_msg(int level, const char * format, ...)
@@ -269,19 +278,20 @@ send_request:
 
   if (connection_ptr->upload)
   {
-    snprintf(size_str, sizeof(size_str), "%zu", UL_SIZE);
+    snprintf(size_str, sizeof(size_str), "%zu", g_ul_size);
   }
 
   ret = snprintf(
     connection_ptr->buffer,
     sizeof(connection_ptr->buffer),
-    "%s HTTP/1.1\r\n"
+    "%s %s HTTP/1.1\r\n"
     "User-Agent: netspeed/0.0\r\n"
     "Accept: */*\r\n"
     "Host: %s\r\n"
     "%s%s%s"
     "\r\n",
-    connection_ptr->upload ? "POST " UL_RESOURCE : "GET " DL_RESOURCE,
+    connection_ptr->upload ? "POST" : "GET",
+    connection_ptr->upload ? g_ul_resource : g_dl_resource,
     connection_ptr->host,
     connection_ptr->upload ? "Content-Length: " : "",
     connection_ptr->upload ? size_str : "",
@@ -350,7 +360,7 @@ send_request_continue:
     {
       connection_ptr->state = STATE_SENDING_REQUEST_BODY;
       connection_ptr->offset = 0;
-      connection_ptr->size = UL_SIZE;
+      connection_ptr->size = g_ul_size;
       LINF("sending request body...");
       goto send_request_continue;
     }
@@ -507,7 +517,19 @@ read_reply_body:
 
     connection_ptr->size -= sret;
     connection_ptr->offset += sret;
-    //printf("(%zd)", sret); fflush(stdout);
+    if (g_progress > 0)
+    {
+      if (g_progress == 1)
+      {
+        printf(".");
+      }
+      else
+      {
+        printf("(%zd)", sret);
+      }
+
+      fflush(stdout);
+    }
   }
 
   LINF("%zu body bytes read", connection_ptr->offset);
@@ -622,24 +644,116 @@ int main(int argc, char ** argv)
     work_fn work;
     cleanup_fn cleanup;
     struct pollfd pollfd;
-  } workers[WORKERS];
-  struct pollfd pollfds[WORKERS];
-  int i, nfds, poll_index;
+  };
+  struct worker * workers = NULL;
+  struct pollfd * pollfds = NULL;
+  int nfds, poll_index;
+  size_t i;
 
-  LFRC("Generate network traffic. Written by Nedko Arnaudov.");
+  argc--; argv++;
 
-  if (argc < 2)
+  /* process options */
+  while (argc > 0 && **argv == '-')
   {
-    printf("Usage: netspeed <type> <host>\n");
-    printf("<type> is either 'u' (upload) or 'd' (download)\n");
-    printf("<host> is a ookla speedtest host\n");
+    if (strcmp(*argv, "-v") == 0)
+    {
+      g_log_max++;
+    }
+    else if (strcmp(*argv, "-q") == 0)
+    {
+      g_log_max--;
+    }
+    else if (strcmp(*argv, "-s") == 0)
+    {
+      g_log_max = -1;
+    }
+    else if (strcmp(*argv, "-p") == 0)
+    {
+      g_progress++;
+    }
+    else if (strcmp(*argv, "--help") == 0)
+    {
+      goto help;
+    }
+    else if (strcmp(*argv, "-w") == 0 && argc >= 2)
+    {
+      i = atoi(argv[1]);
+      if (i < 1)
+      {
+        LERR("Bad value for workers option");
+        goto optfail;
+      }
+
+      g_workers = i;
+      argc--; argv++;
+    }
+    else if (strcmp(*argv, "-u") == 0 && argc >= 2)
+    {
+      i = atoi(argv[1]);
+      if (i < 1)
+      {
+        LERR("Bad value for upload size option");
+        goto optfail;
+      }
+
+      g_ul_size = i;
+      argc--; argv++;
+    }
+    else
+    {
+      LWRN("Ignoring unknown option %s", *argv);
+    }
+
+    //printf("log level max is %d\n", g_log_max);
+    argc--; argv++;
+  }
+
+  if (argc != 2)
+  {
+  help:
+    LFRC(ABOUT);
+    LFRC("Usage: netspeed [options] <type> <host>");
+    LFRC("");
+    LFRC("Options:");
+    LFRC("  -v Increase verbosity. May be used more than once.");
+    LFRC("  -q Decrease verbosity. May be used more than once.");
+    LFRC("  -s Be completely silent.");
+    LFRC("  -p Print progress (dots). Use twice for printing chunk sizes.");
+    LFRC("  -w <num> Workers count.");
+    LFRC("  -u <num> Upload size. Ignored when downloading.");
+    LFRC("  --help Shows this help text");
+    LFRC("");
+    LFRC("  <type> is either 'u' (upload) or 'd' (download)");
+    LFRC("  <host> is a ookla speedtest host");
     ret = 0;
     goto exit;
   }
 
-  for (i = 0; i < WORKERS; i++)
+  LFRC(ABOUT);
+  if (g_log_max != LOGLVL_DEFAULT_MAX)
   {
-    workers[i].cleanup = NULL;
+    LFRC("log level max is %d", g_log_max);
+  }
+
+  LFRC("%zu workers", g_workers);
+  LFRC("POST body size: %zu bytes", g_ul_size);
+  //LFRC("download resource: %s", g_dl_resource);
+  //LFRC("upload resource: %s", g_ul_resource);
+
+  workers = calloc(g_workers, sizeof(struct worker));
+  if (workers == NULL)
+  {
+    LERR("memory allocation failed. (workers)");
+    ret = 1;
+    goto free;
+  }
+
+  pollfds = calloc(g_workers, sizeof(struct pollfd));
+  if (pollfds == NULL)
+  {
+    LERR("memory allocation failed. (pollfds)");
+    ret = 1;
+    goto free;
   }
 
   if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
@@ -648,23 +762,24 @@ int main(int argc, char ** argv)
     goto fail;
   }
 
-  ip = resolve_host(argv[2]);
+  ip = resolve_host(argv[1]);
   if (ip == 0)
   {
     goto fail;
   }
 
-  for (i = 0; i < WORKERS; i++)
+  for (i = 0; i < g_workers; i++)
   {
     if (!create_worker(
           i,
-          argv[1],
+          argv[0],
           ip,
-          argv[2],
+          argv[1],
           &workers[i].ctx,
           &workers[i].work,
           &workers[i].cleanup))
     {
+      g_workers = 0;
       goto fail;
     }
 
@@ -689,7 +804,7 @@ int main(int argc, char ** argv)
   poll_index = 0;
 loop:
   assert(poll_index == 0);
-  for (i = 0; i < WORKERS; i++)
+  for (i = 0; i < g_workers; i++)
   {
     if (workers[i].work != NULL)
     {
@@ -757,7 +872,7 @@ loop:
     assert(poll_index < nfds);
     if (pollfds[poll_index].revents != 0)
     {
-      for (i = 0; i < WORKERS; i++)
+      for (i = 0; i < g_workers; i++)
       {
         if (workers[i].work != NULL &&
             workers[i].pollfd.fd == pollfds[poll_index].fd)
@@ -767,7 +882,7 @@ loop:
           break;
         }
       }
-      assert(i < WORKERS);        /* fd/worker not found */
+      assert(i < g_workers);        /* fd/worker not found */
       ret--;
     }
     poll_index++;
@@ -778,13 +893,19 @@ loop:
 fail:
   ret = 1;
 cleanup:
-  for (i = 0; i < WORKERS; i++)
+  for (i = 0; i < g_workers; i++)
   {
     if (workers[i].cleanup != NULL)
     {
       workers[i].cleanup(workers[i].ctx);
     }
   }
+free:
+  free(workers);
+  free(pollfds);
 exit:
   return ret;
+optfail:
+  ret = 1;
+  goto exit;
 }
