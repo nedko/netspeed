@@ -44,12 +44,12 @@
 #include <sched.h>
 #endif
 
-#define DEFAULT_WORKERS 2
+#define DEFAULT_WORKERS 4
 
 #define DEFAULT_DL_RESOURCE "/speedtest/random4000x4000.jpg"
 //#define DL_RESOURCE "/speedtest/random500x500.jpg"
 #define DEFAULT_UL_RESOURCE "/speedtest/upload.php"
-#define DEFAULT_UL_SIZE ((size_t)(30 * 1024 * 1024))
+#define DEFAULT_UL_SIZE ((size_t)(3 * 1024 * 1024))
 
 #define ABOUT "Generate network traffic. Written by Nedko Arnaudov."
 
