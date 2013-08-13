@@ -583,15 +583,15 @@ int main(int argc, char ** argv)
     goto fail;
   }
 
+  for (i = 0; i < WORKERS; i++)
+  {
+    workers[i].cleanup = NULL;
+  }
+
   ip = resolve_host(argv[2]);
   if (ip == 0)
   {
     goto fail;
-  }
-
-  for (i = 0; i < WORKERS; i++)
-  {
-    workers[i].cleanup = NULL;
   }
 
   for (i = 0; i < WORKERS; i++)
@@ -706,7 +706,10 @@ fail:
 cleanup:
   for (i = 0; i < WORKERS; i++)
   {
-    workers[i].cleanup(workers[i].ctx);
+    if (workers[i].cleanup != NULL)
+    {
+      workers[i].cleanup(workers[i].ctx);
+    }
   }
 exit:
   return ret;
