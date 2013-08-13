@@ -44,7 +44,7 @@
 #define DL_RESOURCE "/speedtest/random4000x4000.jpg"
 //#define DL_RESOURCE "/speedtest/random500x500.jpg"
 #define UL_RESOURCE "/speedtest/upload.php"
-#define UL_SIZE (30 * 1024 * 1024)
+#define UL_SIZE ((size_t)(30 * 1024 * 1024))
 
 /* OpenBSD */
 #if !defined(MSG_NOSIGNAL)
