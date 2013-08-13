@@ -1,0 +1,16 @@
+A command line tool that generates traffic to/from servers (ookla speedtest.net)
+The tool is written in C and aims to be fast and require no additional dependencies.
+
+Usage: netspeed <type> <host>
+<type> is either 'u' (upload) or 'd' (download)
+<host> is a ookla speedtest host
+
+Some servers are listed in hosts.txt
+
+List of all servers, in xml format, can be retrieved form this location:
+http://www.speedtest.net/speedtest-servers.php
+
+Similar tools:
+https://github.com/Janhouse/tespeed
+https://github.com/sivel/speedtest-cli
+http://tech.ivkin.net/wiki/Run_Speedtest_from_command_line
