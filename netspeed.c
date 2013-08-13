@@ -39,6 +39,9 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <signal.h>
+#if !defined(NO_SCHED_FIFO)
+#include <sched.h>
+#endif
 
 #define WORKERS 2
 
@@ -552,6 +555,22 @@ create_worker(
   return true;
 }
 
+#if !defined(NO_SCHED_FIFO)
+static bool disable_preemption(int priority)
+{
+  struct sched_param sched_param;
+
+  sched_param.sched_priority = priority;
+  if (sched_setscheduler(0, SCHED_FIFO, &sched_param) != 0)
+  {
+    fprintf(stderr, "Cannot set scheduling policy %d (%s)\n", errno, strerror(errno));
+    return false;
+  }
+
+  return true;
+}
+#endif
+
 int main(int argc, char ** argv)
 {
   int ret;
@@ -618,6 +637,13 @@ int main(int argc, char ** argv)
     fprintf(stderr, "mlockall() failed. %d (%s)\n", errno, strerror(errno));
     //goto fail;
   }
+
+#if !defined(NO_SCHED_FIFO)
+  if (!disable_preemption(10))
+  {
+    //goto fail;
+  }
+#endif
 
   poll_index = 0;
 loop:
