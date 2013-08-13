@@ -576,13 +576,6 @@ int main(int argc, char ** argv)
     goto exit;
   }
 
-  ret = mlockall(MCL_FUTURE);
-  if (ret == -1)
-  {
-    fprintf(stderr, "mlockall() failed. %d (%s)\n", errno, strerror(errno));
-    goto fail;
-  }
-
   for (i = 0; i < WORKERS; i++)
   {
     workers[i].cleanup = NULL;
@@ -610,6 +603,13 @@ int main(int argc, char ** argv)
 
     workers[i].pollfd.fd = -1;
     workers[i].pollfd.revents = 0;
+  }
+
+  ret = mlockall(MCL_CURRENT | MCL_FUTURE);
+  if (ret == -1)
+  {
+    fprintf(stderr, "mlockall() failed. %d (%s)\n", errno, strerror(errno));
+    //goto fail;
   }
 
   poll_index = 0;
