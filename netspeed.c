@@ -417,7 +417,7 @@ read_reply_header:
       LINF("header size is %zu bytes", connection_ptr->offset);
       for (i = 0; i < connection_ptr->offset; i++)
       {
-        if (connection_ptr->buffer[i] < 0)
+        if ((signed char)connection_ptr->buffer[i] < 0)
         {
           LERR("invalid char in HTTP reply header");
           goto error;
