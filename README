@@ -8,7 +8,7 @@ Usage: netspeed <type> <host>
 Some servers are listed in hosts.txt
 
 List of all servers, in xml format, can be retrieved from this location:
-http://www.speedtest.net/speedtest-servers.php
+http://www.speedtest.net/speedtest-servers-static.php
 
 Similar tools:
 https://github.com/Janhouse/tespeed
