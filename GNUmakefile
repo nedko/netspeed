@@ -1,6 +1,6 @@
 OS := $(shell uname -s)
 CFLAGS := -Wall -Wextra
-CFLAGS += -Werror
+#CFLAGS += -Werror
 CFLAGS += -O2
 #CFLAGS += -O0 -g
 
