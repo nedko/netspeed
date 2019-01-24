@@ -28,6 +28,13 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <stdint.h>
+#include <limits.h>
+
+/* some platforms (i.e. OpenBSD 6.4) don't define SIZE_MAX, but have SIZE_T_MAX */
+#if !defined(SIZE_MAX) && defined(SIZE_T_MAX)
+#define SIZE_MAX SIZE_T_MAX
+#endif
 
 /* POSIX */
 #include <poll.h>
